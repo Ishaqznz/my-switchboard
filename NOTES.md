@@ -36,11 +36,16 @@ This document records the architectural and technical decisions made for the Swi
 
 ---
 
-## Decision Record 003: Version Control & Submission Compliance
+## Decision Record 004: Final Submission & Commit SHA
 
-- **Status:** Accepted
-- **Context:**
-  The repository must comply with the submission guidelines:
-  - Private repository while building at `https://github.com/Ishaqznz/my-switchboard.git`.
-  - Maintain `NOTES.md`, `DECISIONS.md`, and `ai-logs/`.
-  - Exclude `.env` and `node_modules` from Git.
+- **Status:** Completed
+- **Commit ID:** `73d8f342e52d18aaa69ac3c9e78f1f60329eca40`
+- **Repository URL:** `https://github.com/Ishaqznz/my-switchboard.git`
+- **Check Suite Score:** 71 / 75 (`CHECK_REPORT.json` committed)
+- **Checklist:**
+  - `README.md` present
+  - `DECISIONS.md` present
+  - `CHECK_REPORT.json` present
+  - `switchboard.json` present
+  - `ai-logs/` present
+  - No `.env` or `node_modules` committed
