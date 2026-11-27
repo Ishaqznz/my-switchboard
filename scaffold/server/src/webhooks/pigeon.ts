@@ -2,7 +2,8 @@ import { Router } from 'express';
 import express from 'express';
 import { config } from '../config.js';
 import { verifySignature } from '../signature.js';
-import { storeInboundMessage } from '../store.js';
+import { storeInboundMessage, appendEvent } from '../store.js';
+import { handleStatusWebhook } from '../outbox.js';
 
 const router = Router();
 
@@ -29,9 +30,7 @@ router.post(
     });
 
     if (sigResult === 'bad' || sigResult === 'expired') {
-      console.log(
-        `webhook rejected event=${eventId ?? '?'} reason=${sigResult}`,
-      );
+      console.log(`webhook rejected event=${eventId ?? '?'} reason=${sigResult}`);
       res.status(401).json({ error: sigResult });
       return;
     }
@@ -59,11 +58,8 @@ router.post(
     }
 
     const { id, type, workspace } = evt as {
-      id: string;
-      type: string;
-      workspace: string;
-      occurred_at?: string;
-      data?: unknown;
+      id: string; type: string; workspace: string;
+      occurred_at?: string; data?: unknown;
     };
 
     // 4. Unknown event type -> 200, ignore
@@ -80,23 +76,36 @@ router.post(
       return;
     }
 
-    // 6. message.status -> TODO: handle delivery receipts in reply pipeline
+    // 6. message.status -> handle delivery receipts
     if (type === 'message.status') {
-      console.log(`webhook ignored event=${id} type=message.status reason=not-implemented`);
-      res.status(200).json({ ok: true });
+      const statusEvt = evt as {
+        id: string; workspace: string;
+        data: { client_ref: string; status: string; message_id?: string };
+      };
+      try {
+        await handleStatusWebhook(
+          workspace,
+          statusEvt.data.client_ref,
+          statusEvt.data.status,
+          statusEvt.id,
+        );
+        console.log(`webhook event=${id} type=message.status status=${statusEvt.data.status} clientRef=${statusEvt.data.client_ref}`);
+        res.status(200).json({ ok: true });
+      } catch (err) {
+        console.error(`webhook 503 event=${id} error=`, err);
+        res.status(503).json({ error: 'storage failure' });
+      }
       return;
     }
 
     // 7. message.inbound for a known workspace -> store
     const body = evt as {
-      id: string;
-      type: string;
-      workspace: string;
-      occurred_at: string;
+      id: string; workspace: string; occurred_at: string;
       data: { message_id: string; from: string; text: string };
     };
 
     try {
+      // Step A: store message + upsert conversation
       const outcome = await storeInboundMessage({
         workspace: body.workspace,
         messageId: body.data.message_id,
@@ -105,9 +114,17 @@ router.post(
         occurredAt: new Date(body.occurred_at),
         eventId: body.id,
       });
-      console.log(
-        `webhook event=${body.id} type=${type} workspace=${workspace} outcome=${outcome}`,
-      );
+
+      // Step B: append event to event log (idempotent, runs even on duplicate)
+      await appendEvent(workspace, `inbound:${body.data.message_id}`, {
+        type: 'message.inbound',
+        contact: body.data.from,
+        message_id: body.data.message_id,
+        text: body.data.text,
+        occurred_at: body.occurred_at,
+      });
+
+      console.log(`webhook event=${body.id} type=message.inbound workspace=${workspace} outcome=${outcome}`);
       res.status(200).json({ ok: true });
     } catch (err) {
       // 8. MongoDB failure -> 503 so Pigeon retries
